@@ -1,0 +1,88 @@
+package convertJSONtoJAVA;
+import java.io.FileWriter;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVPrinter;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+public class requestJSONtoCSV {
+	public static void main(String[] args) {
+		String jsonFilePath = "C:/Development/myCode/fromRequest/requestInput.json";
+		String csvOutputPath = "C:/Development/myCode/fromRequest/TestCopay.csv";
+		
+		try {
+			String jsonString = new String(Files.readAllBytes(Paths.get(jsonFilePath)));
+			JSONObject json = new JSONObject(jsonString);
+			JSONArray keyValueArray = json.getJSONArray("keyValue");
+			
+			Map<String, Integer> headerMap = new LinkedHashMap<>();
+			
+			for (int i = 0; i < keyValueArray.length(); i++) {
+				JSONArray attributes = keyValueArray.getJSONObject(i).getJSONArray("keyValue");
+				for (int j = 0; j < attributes.length(); j++) {
+					String attribute = attributes.getJSONObject(j).getString("attribute");
+					headerMap.putIfAbsent(attribute, headerMap.size());
+				}
+			}
+			
+			try (CSVPrinter printer = new CSVPrinter(new FileWriter(csvOutputPath), CSVFormat.DEFAULT.withHeader(headerMap.keySet().toArray(new String[0])))){
+				for (int i = 0; i < keyValueArray.length(); i++) {
+					JSONArray attributes = keyValueArray.getJSONObject(i).getJSONArray("keyValue");
+					String[] record = new String[headerMap.size()];
+					for (int j = 0; j < attributes.length(); j++) {
+						JSONObject attribute = attributes.getJSONObject(j);
+						String attrName = attribute.getString("attribute");
+						String value = attribute.getString("value");
+						int columnIndex = headerMap.get(attrName);
+						record[columnIndex] = value;
+					}
+					printer.printRecord((Object[]) record);
+				}
+			}
+			System.out.println("CSV file has been created successfully");
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+}
+
+/**
+ * For this code, the JSON structure requires like this...
+ * 
+ * {							<-- This requires for the JSON file structure.
+ * 		"keyValue":[            <--- Just add this to one of the segment. Ex: Basically replace "Copay" with 'keyValue".
+ * 			{
+ * 				"keyValue": [
+ * 					{
+ * 						"attribute" : "attr1",
+ * 						"value": "val1"
+ * 					},
+ * 					{
+ * 						"attribute" : "attr2",
+ * 						"value": "val2"
+ * 					}
+ * 				]
+ * 			}
+ * 		]
+ * }
+ */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
