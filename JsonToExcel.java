@@ -11,69 +11,52 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
 
-public class JsonToExcel {
+public class JsonToExcelBatch {
 
-    // We'll store these benefitRequest fields in memory so we can restore them later.
-    // In a real application, you might store them in a DB, pass them to the next step, or
-    // put them in a hidden sheet if you want them inside the workbook.
-    public static String transactionID;
-    public static String clientCode;
-    public static Object data; // could be null or some object
+    // Adjust these paths as you prefer
+    private static final String INPUT_DIR  = "C:/Development/myCode/inputJson";
+    private static final String OUTPUT_DIR = "C:/Development/myCode/outputExcel";
 
     public static void main(String[] args) {
-
-        String jsonInputPath = "C:/Development/myCode/fromRequest/sample.json";
-        String excelOutputPath = "C:/Development/myCode/fromRequest/output.xlsx";
-
         try {
-            // 1) Read the JSON text from file
-            String jsonString = new String(Files.readAllBytes(Paths.get(jsonInputPath)));
-            JSONObject root = new JSONObject(jsonString);
+            // 1) Ensure input directory exists; if not, create it and prompt user.
+            File inputDir = new File(INPUT_DIR);
+            if (!inputDir.exists()) {
+                boolean created = inputDir.mkdirs();
+                if (created) {
+                    System.out.println("Created input directory: " + INPUT_DIR);
+                }
+                System.out.println("Please place your .json files in this directory, then run again.");
+                return; 
+            }
 
-            // 2) Grab "benefitRequest" (one object)
-            JSONObject benefitRequest = root.optJSONObject("benefitRequest");
-            if (benefitRequest == null) {
-                System.out.println("No benefitRequest object found!");
+            // 2) Find all .json files
+            File[] jsonFiles = inputDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".json"));
+            if (jsonFiles == null || jsonFiles.length == 0) {
+                System.out.println("No JSON files found in " + INPUT_DIR);
                 return;
             }
 
-            // Extract top-level fields from benefitRequest that we do NOT want in Excel,
-            // but do want to preserve for later.
-            transactionID = benefitRequest.optString("transactionID");
-            clientCode = benefitRequest.optString("clientCode");
-            // 'data' could be null or any value (in your example, it's null).
-            // We'll just store whatever it is.
-            data = benefitRequest.opt("data");
-
-            // Now let's create the workbook for only the details we want in Excel.
-            Workbook workbook = new XSSFWorkbook();
-
-            // 3) dataSet → CVS → GeneralPlanDetails
-            JSONObject dataSet = benefitRequest.optJSONObject("dataSet");
-            if (dataSet != null) {
-                JSONObject cvs = dataSet.optJSONObject("CVS");
-                if (cvs != null) {
-                    // a) GeneralPlanDetails
-                    if (cvs.has("GeneralPlanDetails")) {
-                        JSONObject generalPlanDetails = cvs.getJSONObject("GeneralPlanDetails");
-                        createSheetFromKeyValueObject(workbook, "GeneralPlanDetails", generalPlanDetails);
-                    }
-
-                    // b) Copay (array)
-                    if (cvs.has("Copay")) {
-                        JSONArray copayArray = cvs.getJSONArray("Copay");
-                        createSheetFromKeyValueArray(workbook, "Copay", copayArray);
-                    }
+            // 3) Ensure output directory exists
+            File outputDir = new File(OUTPUT_DIR);
+            if (!outputDir.exists()) {
+                boolean created = outputDir.mkdirs();
+                if (created) {
+                    System.out.println("Created output directory: " + OUTPUT_DIR);
                 }
             }
 
-            // 4) Write the workbook to an Excel file
-            try (FileOutputStream fos = new FileOutputStream(new File(excelOutputPath))) {
-                workbook.write(fos);
-            }
-            workbook.close();
+            // 4) Convert each JSON file
+            for (File jsonFile : jsonFiles) {
+                // Derive output .xlsx filename
+                String baseName = jsonFile.getName().replaceFirst("[.][^.]+$", "");
+                File excelFile = new File(outputDir, baseName + ".xlsx");
 
-            System.out.println("Excel file created: " + excelOutputPath);
+                System.out.println("Converting " + jsonFile.getName() + " -> " + excelFile.getName());
+                convertJsonToExcel(jsonFile, excelFile);
+            }
+
+            System.out.println("All conversions finished.");
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -81,16 +64,85 @@ public class JsonToExcel {
     }
 
     /**
-     * Creates a sheet from an object that has a "keyValue" array
-     * (e.g. "GeneralPlanDetails": {"keyValue": [ ... ]}).
+     * Reads a single JSON file, and creates an Excel file
+     * with sheets for "GeneralPlanDetails" and "Copay" only.
+     * 
+     * We skip creating a "benefitRequest" sheet, but you can modify
+     * if you want to store it in a hidden sheet or somewhere else.
+     */
+    private static void convertJsonToExcel(File jsonFile, File excelFile) {
+        Workbook workbook = null;
+        FileOutputStream fos = null;
+
+        try {
+            // Read JSON
+            String jsonString = new String(Files.readAllBytes(Paths.get(jsonFile.toURI())));
+            JSONObject root = new JSONObject(jsonString);
+
+            // "benefitRequest"
+            JSONObject benefitRequest = root.optJSONObject("benefitRequest");
+            if (benefitRequest == null) {
+                // If there's no benefitRequest, just skip or handle differently
+                System.out.println("No 'benefitRequest' object found in " + jsonFile.getName());
+                return;
+            }
+
+            // dataSet -> CVS
+            JSONObject dataSet = benefitRequest.optJSONObject("dataSet");
+            if (dataSet == null) {
+                System.out.println("No 'dataSet' in " + jsonFile.getName());
+                return;
+            }
+
+            JSONObject cvs = dataSet.optJSONObject("CVS");
+            if (cvs == null) {
+                System.out.println("No 'CVS' in " + jsonFile.getName());
+                return;
+            }
+
+            // Create workbook
+            workbook = new XSSFWorkbook();
+
+            // If "GeneralPlanDetails" exists, create a sheet
+            if (cvs.has("GeneralPlanDetails")) {
+                JSONObject generalPlanDetails = cvs.getJSONObject("GeneralPlanDetails");
+                createSheetFromKeyValueObject(workbook, "GeneralPlanDetails", generalPlanDetails);
+            }
+
+            // If "Copay" (array) exists, create a sheet
+            if (cvs.has("Copay")) {
+                JSONArray copayArray = cvs.getJSONArray("Copay");
+                createSheetFromKeyValueArray(workbook, "Copay", copayArray);
+            }
+
+            // Write to Excel
+            fos = new FileOutputStream(excelFile);
+            workbook.write(fos);
+            System.out.println("Created Excel: " + excelFile.getAbsolutePath());
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            // Close resources
+            if (workbook != null) {
+                try { workbook.close(); } catch (Exception e) { /* ignore */ }
+            }
+            if (fos != null) {
+                try { fos.close(); } catch (Exception e) { /* ignore */ }
+            }
+        }
+    }
+
+    /**
+     * Creates a sheet from an object that has a "keyValue" array,
+     * e.g. "GeneralPlanDetails": { "keyValue": [ { "attribute":"MobInd", "value":"N" } ] }
      */
     private static void createSheetFromKeyValueObject(Workbook workbook, String sheetName, JSONObject obj) {
         if (!obj.has("keyValue")) return;
 
-        // "keyValue" is an array of { "attribute": ..., "value": ... }
         JSONArray keyValueArray = obj.getJSONArray("keyValue");
 
-        // Gather attributes
+        // Gather attributes (column headers)
         Set<String> allAttributes = new LinkedHashSet<>();
         for (int i = 0; i < keyValueArray.length(); i++) {
             JSONObject kv = keyValueArray.getJSONObject(i);
@@ -98,6 +150,7 @@ public class JsonToExcel {
         }
 
         Sheet sheet = workbook.createSheet(sheetName);
+
         // Header row
         Row header = sheet.createRow(0);
         List<String> attributes = new ArrayList<>(allAttributes);
@@ -105,19 +158,17 @@ public class JsonToExcel {
             header.createCell(i).setCellValue(attributes.get(i));
         }
 
-        // We'll assume there's usually only one row for "GeneralPlanDetails".
-        // But let's handle the possibility of multiple anyway.
-        for (int r = 0; r < 1 /* or keyValueArray.length() for multi-row? */; r++) {
-            Row row = sheet.createRow(r + 1); // data row
-            for (int i = 0; i < keyValueArray.length(); i++) {
-                JSONObject kv = keyValueArray.getJSONObject(i);
-                String attr = kv.getString("attribute");
-                String val = kv.getString("value");
+        // Data row(s) - typically there's only one set of keyValue pairs,
+        // but if you had more complex data, you'd adjust accordingly.
+        Row row = sheet.createRow(1);
+        for (int i = 0; i < keyValueArray.length(); i++) {
+            JSONObject kv = keyValueArray.getJSONObject(i);
+            String attr = kv.getString("attribute");
+            String val = kv.getString("value");
 
-                int colIndex = attributes.indexOf(attr);
-                if (colIndex >= 0) {
-                    row.createCell(colIndex).setCellValue(val);
-                }
+            int colIndex = attributes.indexOf(attr);
+            if (colIndex >= 0) {
+                row.createCell(colIndex).setCellValue(val);
             }
         }
 
@@ -128,41 +179,49 @@ public class JsonToExcel {
     }
 
     /**
-     * Creates a sheet from an array, each element having {"keyValue": [...]}.
-     * (e.g. "Copay": [ { "keyValue": [...] }, { "keyValue": [...] } ])
+     * Creates a sheet from an array of objects, each having "keyValue" array.
+     * e.g. "Copay": [
+     *   { "keyValue": [ { "attribute":"CopayChannel","value":"RTL"} ] },
+     *   { "keyValue": [ { "attribute":"CopayChannel","value":"MAIL"} ] }
+     * ]
      */
     private static void createSheetFromKeyValueArray(Workbook workbook, String sheetName, JSONArray array) {
-        // Collect all possible attributes across all objects
+        // 1) Collect all possible attributes across all elements
         Set<String> allAttributes = new LinkedHashSet<>();
         List<JSONArray> keyValueArrays = new ArrayList<>();
 
         for (int i = 0; i < array.length(); i++) {
             JSONObject element = array.getJSONObject(i);
-            JSONArray kvArray = element.optJSONArray("keyValue");
-            if (kvArray != null) {
-                keyValueArrays.add(kvArray);
-                for (int j = 0; j < kvArray.length(); j++) {
-                    JSONObject kv = kvArray.getJSONObject(j);
+            JSONArray kvArr = element.optJSONArray("keyValue");
+            if (kvArr != null) {
+                keyValueArrays.add(kvArr);
+                for (int j = 0; j < kvArr.length(); j++) {
+                    JSONObject kv = kvArr.getJSONObject(j);
                     allAttributes.add(kv.getString("attribute"));
                 }
             }
         }
 
+        if (allAttributes.isEmpty()) {
+            // No data to write
+            return;
+        }
+
         Sheet sheet = workbook.createSheet(sheetName);
 
-        // Header row
+        // 2) Header row
         Row header = sheet.createRow(0);
         List<String> attributes = new ArrayList<>(allAttributes);
         for (int i = 0; i < attributes.size(); i++) {
             header.createCell(i).setCellValue(attributes.get(i));
         }
 
-        // Each element in the array => one row
+        // 3) Each element => one row
         int rowIndex = 1;
-        for (JSONArray kvArray : keyValueArrays) {
+        for (JSONArray kvArr : keyValueArrays) {
             Row row = sheet.createRow(rowIndex++);
-            for (int j = 0; j < kvArray.length(); j++) {
-                JSONObject kv = kvArray.getJSONObject(j);
+            for (int j = 0; j < kvArr.length(); j++) {
+                JSONObject kv = kvArr.getJSONObject(j);
                 String attr = kv.getString("attribute");
                 String val = kv.getString("value");
 
@@ -173,7 +232,7 @@ public class JsonToExcel {
             }
         }
 
-        // Auto-size columns
+        // 4) Auto-size columns
         for (int c = 0; c < attributes.size(); c++) {
             sheet.autoSizeColumn(c);
         }
