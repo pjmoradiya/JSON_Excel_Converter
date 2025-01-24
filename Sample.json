@@ -1,0 +1,24 @@
+{
+  "benefitRequest": {
+    "transactionID": "999999",
+    "clientCode": "GHAS",
+    "data": null,
+    "dataSet": {
+      "CVS": {
+        "GeneralPlanDetails": {
+          "keyValue": [
+            {
+              "attribute": "MobInd",
+              "value": "N"
+            }]}
+        "Copay": [
+          {
+            "keyValue": [
+              {
+                "attribute": "CopayChannel",
+                "value": "RTL"
+              }],"keyValue": [
+              {
+                "attribute": "CopayChannel",
+                "value": "MAIL"
+              }]}]}}}}
