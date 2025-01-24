@@ -12,81 +12,51 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
-public class ExcelToJson {
+public class ExcelToJsonBatch {
+
+    // Adjust these paths as you prefer
+    private static final String INPUT_DIR  = "C:/Development/myCode/inputExcel";
+    private static final String OUTPUT_DIR = "C:/Development/myCode/outputJson";
 
     public static void main(String[] args) {
-
-        String excelInputPath = "C:/Development/myCode/fromRequest/output.xlsx";
-        String jsonOutputPath = "C:/Development/myCode/fromRequest/reconstructed.json";
-
-        try (FileInputStream fis = new FileInputStream(excelInputPath);
-             Workbook workbook = new XSSFWorkbook(fis)) {
-
-            // We'll reconstruct the final JSON structure:
-            // {
-            //   "benefitRequest": {
-            //     "transactionID": "...",
-            //     "clientCode": "...",
-            //     "data": ...,
-            //     "dataSet": {
-            //       "CVS": {
-            //         "GeneralPlanDetails": { "keyValue": [ ... ] },
-            //         "Copay": [ { "keyValue": [...] }, ... ]
-            //       }
-            //     }
-            //   }
-            // }
-            JSONObject root = new JSONObject();
-            JSONObject benefitRequest = new JSONObject();
-            root.put("benefitRequest", benefitRequest);
-
-            // Re-inject the fields we stored in memory during JsonToExcel
-            // (If you are running this as a separate program, you'd need to pass them in.)
-            benefitRequest.put("transactionID", JsonToExcel.transactionID);
-            benefitRequest.put("clientCode", JsonToExcel.clientCode);
-
-            // 'data' might be null or something else
-            if (JsonToExcel.data == null) {
-                benefitRequest.put("data", JSONObject.NULL);
-            } else if (JsonToExcel.data instanceof JSONObject) {
-                benefitRequest.put("data", (JSONObject)JsonToExcel.data);
-            } else if (JsonToExcel.data instanceof JSONArray) {
-                benefitRequest.put("data", (JSONArray)JsonToExcel.data);
-            } else {
-                // Just convert to string, or handle it as needed
-                benefitRequest.put("data", JsonToExcel.data.toString());
+        try {
+            // 1) Ensure input directory
+            File inputDir = new File(INPUT_DIR);
+            if (!inputDir.exists()) {
+                boolean created = inputDir.mkdirs();
+                if (created) {
+                    System.out.println("Created input directory: " + INPUT_DIR);
+                }
+                System.out.println("Please place your .xlsx files in this directory, then run again.");
+                return;
             }
 
-            // Now reconstruct "dataSet" → "CVS"
-            JSONObject dataSet = new JSONObject();
-            JSONObject cvs = new JSONObject();
-            dataSet.put("CVS", cvs);
-            benefitRequest.put("dataSet", dataSet);
+            // 2) Find all .xlsx files
+            File[] excelFiles = inputDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".xlsx"));
+            if (excelFiles == null || excelFiles.length == 0) {
+                System.out.println("No .xlsx files found in " + INPUT_DIR);
+                return;
+            }
 
-            // Loop sheets to parse them back into JSON
-            for (int i = 0; i < workbook.getNumberOfSheets(); i++) {
-                Sheet sheet = workbook.getSheetAt(i);
-                String sheetName = sheet.getSheetName();
-
-                if ("GeneralPlanDetails".equals(sheetName)) {
-                    // Single object with "keyValue" array
-                    JSONObject generalPlanDetails = new JSONObject();
-                    parseKeyValueObjectSheet(sheet, generalPlanDetails);
-                    cvs.put("GeneralPlanDetails", generalPlanDetails);
-                }
-                else if ("Copay".equals(sheetName)) {
-                    // An array, each row becomes { "keyValue": [...] }
-                    JSONArray copayArray = new JSONArray();
-                    parseKeyValueArraySheet(sheet, copayArray);
-                    cvs.put("Copay", copayArray);
+            // 3) Ensure output directory
+            File outputDir = new File(OUTPUT_DIR);
+            if (!outputDir.exists()) {
+                boolean created = outputDir.mkdirs();
+                if (created) {
+                    System.out.println("Created output directory: " + OUTPUT_DIR);
                 }
             }
 
-            // Finally, write reconstructed JSON to file
-            try (FileOutputStream fos = new FileOutputStream(new File(jsonOutputPath))) {
-                fos.write(root.toString(4).getBytes());
+            // 4) Convert each Excel file
+            for (File excelFile : excelFiles) {
+                String baseName = excelFile.getName().replaceFirst("[.][^.]+$", "");
+                File jsonFile = new File(outputDir, baseName + ".json");
+
+                System.out.println("Converting " + excelFile.getName() + " -> " + jsonFile.getName());
+                convertExcelToJson(excelFile, jsonFile);
             }
-            System.out.println("Reconstructed JSON written to: " + jsonOutputPath);
+
+            System.out.println("All Excel->JSON conversions finished.");
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -94,64 +64,145 @@ public class ExcelToJson {
     }
 
     /**
-     * A sheet with 1 header row + 1 data row -> "keyValue": [...]
-     * (Used for something like "GeneralPlanDetails".)
+     * Reads an Excel (.xlsx) file, looks for sheets "GeneralPlanDetails" & "Copay",
+     * and reconstructs a JSON structure:
+     * 
+     * {
+     *   "benefitRequest": {
+     *     "transactionID": "PLACEHOLDER",
+     *     "clientCode": "PLACEHOLDER",
+     *     "data": null,
+     *     "dataSet": {
+     *       "CVS": {
+     *         "GeneralPlanDetails": { "keyValue": [ ... ] },
+     *         "Copay": [ { "keyValue": [ ... ] }, ... ]
+     *       }
+     *     }
+     *   }
+     * }
+     */
+    private static void convertExcelToJson(File excelFile, File jsonFile) {
+        FileInputStream fis = null;
+        FileOutputStream fos = null;
+        Workbook workbook = null;
+
+        try {
+            fis = new FileInputStream(excelFile);
+            workbook = new XSSFWorkbook(fis);
+
+            // Build the main structure
+            JSONObject root = new JSONObject();
+            JSONObject benefitRequest = new JSONObject();
+            root.put("benefitRequest", benefitRequest);
+
+            // We do NOT have the original transactionID/clientCode/data.
+            // We'll use placeholders or null. Adjust as needed.
+            benefitRequest.put("transactionID", "PLACEHOLDER");
+            benefitRequest.put("clientCode", "PLACEHOLDER");
+            benefitRequest.put("data", JSONObject.NULL);
+
+            // dataSet -> CVS
+            JSONObject dataSet = new JSONObject();
+            JSONObject cvs = new JSONObject();
+            dataSet.put("CVS", cvs);
+            benefitRequest.put("dataSet", dataSet);
+
+            // Look for each sheet by name
+            for (int i = 0; i < workbook.getNumberOfSheets(); i++) {
+                Sheet sheet = workbook.getSheetAt(i);
+                String sheetName = sheet.getSheetName();
+
+                if ("GeneralPlanDetails".equalsIgnoreCase(sheetName)) {
+                    JSONObject generalPlanDetails = new JSONObject();
+                    parseKeyValueObjectSheet(sheet, generalPlanDetails);
+                    cvs.put("GeneralPlanDetails", generalPlanDetails);
+                } 
+                else if ("Copay".equalsIgnoreCase(sheetName)) {
+                    JSONArray copayArray = new JSONArray();
+                    parseKeyValueArraySheet(sheet, copayArray);
+                    cvs.put("Copay", copayArray);
+                }
+            }
+
+            // Write JSON to file
+            fos = new FileOutputStream(jsonFile);
+            fos.write(root.toString(4).getBytes());
+
+            System.out.println("Created JSON: " + jsonFile.getAbsolutePath());
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            if (workbook != null) {
+                try { workbook.close(); } catch (Exception e) { /* ignore */ }
+            }
+            if (fis != null) {
+                try { fis.close(); } catch (Exception e) { /* ignore */ }
+            }
+            if (fos != null) {
+                try { fos.close(); } catch (Exception e) { /* ignore */ }
+            }
+        }
+    }
+
+    /**
+     * Parses a sheet that has exactly 1 header row + 1 data row.
+     * Rebuilds: { "keyValue": [ { "attribute":"...", "value":"..." }, ... ] }
      */
     private static void parseKeyValueObjectSheet(Sheet sheet, JSONObject obj) {
         JSONArray keyValueArray = new JSONArray();
 
-        Iterator<Row> rowIter = sheet.iterator();
-        if (!rowIter.hasNext()) return; // no rows
-        Row headerRow = rowIter.next();
+        Iterator<Row> rowIterator = sheet.iterator();
+        if (!rowIterator.hasNext()) return;  // no rows
+        Row headerRow = rowIterator.next();
 
-        if (!rowIter.hasNext()) return; // no data row
-        Row dataRow = rowIter.next();
+        if (!rowIterator.hasNext()) return;  // no data
+        Row dataRow = rowIterator.next();
 
-        // For each cell in header row, read the data row
-        int lastCellNum = headerRow.getPhysicalNumberOfCells();
-        for (int c = 0; c < lastCellNum; c++) {
+        int lastCell = headerRow.getPhysicalNumberOfCells();
+        for (int c = 0; c < lastCell; c++) {
             Cell headerCell = headerRow.getCell(c);
             if (headerCell == null) continue;
             String attribute = headerCell.getStringCellValue();
 
-            Cell dataCell = dataRow.getCell(c);
-            String value = (dataCell == null) ? "" : dataCell.toString();
+            Cell valueCell = dataRow.getCell(c);
+            String value = (valueCell == null) ? "" : valueCell.toString();
 
             JSONObject kv = new JSONObject();
             kv.put("attribute", attribute);
             kv.put("value", value);
             keyValueArray.put(kv);
         }
+
         obj.put("keyValue", keyValueArray);
     }
 
     /**
-     * A sheet with 1 header row + multiple data rows -> each row = one object in the array
-     * (Used for something like "Copay".)
+     * Parses a sheet that has 1 header row + multiple data rows.
+     * Rebuilds an array: [ { "keyValue": [ {...}, ... ] }, { ... }, ... ]
      */
     private static void parseKeyValueArraySheet(Sheet sheet, JSONArray array) {
-        Iterator<Row> rowIter = sheet.iterator();
-        if (!rowIter.hasNext()) return;
-        // Header row
-        Row headerRow = rowIter.next();
+        Iterator<Row> rowIterator = sheet.iterator();
+        if (!rowIterator.hasNext()) return;
 
-        int headerCells = headerRow.getPhysicalNumberOfCells();
+        // Header row
+        Row headerRow = rowIterator.next();
+        int lastCell = headerRow.getPhysicalNumberOfCells();
         List<String> headers = new ArrayList<>();
-        for (int c = 0; c < headerCells; c++) {
+        for (int c = 0; c < lastCell; c++) {
             Cell cell = headerRow.getCell(c);
-            String attribute = (cell == null) ? "" : cell.getStringCellValue();
-            headers.add(attribute);
+            headers.add(cell == null ? "" : cell.toString());
         }
 
         // Data rows
-        while (rowIter.hasNext()) {
-            Row dataRow = rowIter.next();
+        while (rowIterator.hasNext()) {
+            Row dataRow = rowIterator.next();
             JSONArray keyValueArray = new JSONArray();
 
             for (int c = 0; c < headers.size(); c++) {
                 String attribute = headers.get(c);
-                Cell dataCell = dataRow.getCell(c);
-                String value = (dataCell == null) ? "" : dataCell.toString();
+                Cell cell = dataRow.getCell(c);
+                String value = (cell == null) ? "" : cell.toString();
 
                 JSONObject kv = new JSONObject();
                 kv.put("attribute", attribute);
@@ -159,10 +210,9 @@ public class ExcelToJson {
                 keyValueArray.put(kv);
             }
 
-            // Each row => { "keyValue": [ ... ] }
-            JSONObject copayObj = new JSONObject();
-            copayObj.put("keyValue", keyValueArray);
-            array.put(copayObj);
+            JSONObject element = new JSONObject();
+            element.put("keyValue", keyValueArray);
+            array.put(element);
         }
     }
 }
